@@ -83,6 +83,130 @@ How can I help you today?
  
  
 # ==================================================
+# EVALUATION REPORT
+# Tracks grounding accuracy and hallucination signals
+# for every knowledge-base answer given during this
+# session, and can summarize/compare them on request.
+# ==================================================
+EVAL_REQUEST_PHRASES = [
+    "evaluation report", "eval report", "give evaluation",
+    "generate evaluation", "grounding accuracy", "hallucination rate",
+    "compare llm", "compare models", "model comparison",
+    "performance report", "generate report"
+]
+ 
+ 
+def is_eval_request(text: str) -> bool:
+    cleaned = text.lower()
+    return any(phrase in cleaned for phrase in EVAL_REQUEST_PHRASES)
+ 
+ 
+STOPWORDS = {
+    "this", "that", "with", "from", "your", "have", "will", "about",
+    "which", "there", "their", "would", "should", "could", "these",
+    "those", "into", "such", "than", "then", "them", "some", "more",
+    "when", "what", "where", "does", "also", "must", "each", "only",
+}
+ 
+ 
+def _content_words(text: str) -> set:
+    words = set(re.findall(r"[a-zA-Z]{4,}", text.lower()))
+    return words - STOPWORDS
+ 
+ 
+def compute_grounding_score(response_text: str, context_text: str) -> float:
+    """
+    Heuristic grounding score: the fraction of meaningful words in the
+    answer that also appear in the retrieved knowledge-base passages.
+    Not a substitute for human-labeled evaluation, but useful as a
+    lightweight, explainable signal for this session.
+    """
+    resp_words = _content_words(response_text)
+    if not resp_words:
+        return 0.0
+    ctx_words = _content_words(context_text)
+    overlap = resp_words & ctx_words
+    return round(len(overlap) / len(resp_words), 3)
+ 
+ 
+def log_rag_interaction(prompt: str, model: str, response_text: str, context_text: str):
+    if "eval_log" not in st.session_state:
+        st.session_state.eval_log = []
+ 
+    score = compute_grounding_score(response_text, context_text)
+    abstained = "could not find that information" in response_text.lower()
+    hallucination_flag = (not abstained) and (score < 0.35)
+ 
+    st.session_state.eval_log.append({
+        "prompt": prompt,
+        "model": model,
+        "grounding_score": score,
+        "hallucination_flag": hallucination_flag,
+        "abstained": abstained,
+        "response_length": len(response_text.split()),
+    })
+ 
+ 
+def generate_evaluation_report() -> str:
+    log = st.session_state.get("eval_log", [])
+ 
+    if not log:
+        return (
+            "### 📊 Evaluation Report\n\n"
+            "No knowledge-base answers have been generated yet in this "
+            "session, so there's nothing to evaluate. Ask a few policy or "
+            "process questions first, then request the evaluation report "
+            "again."
+        )
+ 
+    total = len(log)
+    avg_grounding = sum(r["grounding_score"] for r in log) / total
+    hallucinations = sum(1 for r in log if r["hallucination_flag"])
+    hallucination_rate = hallucinations / total
+    abstentions = sum(1 for r in log if r["abstained"])
+ 
+    models = {}
+    for r in log:
+        models.setdefault(r["model"], []).append(r)
+ 
+    lines = []
+    lines.append("### 📊 Evaluation Report")
+    lines.append("")
+    lines.append(f"**Knowledge-base answers evaluated:** {total}")
+    lines.append(f"**Overall grounding accuracy:** {avg_grounding * 100:.1f}%")
+    lines.append(f"**Overall hallucination rate:** {hallucination_rate * 100:.1f}%")
+    lines.append(f"**Abstained (no answer found in knowledge base):** {abstentions}")
+    lines.append("")
+    lines.append("**Model comparison — tested this session**")
+    lines.append("")
+    lines.append("| Model | Responses | Avg. Grounding Accuracy | Hallucination Rate | Avg. Response Length |")
+    lines.append("|---|---|---|---|---|")
+ 
+    for model_name, rows in models.items():
+        n = len(rows)
+        avg_g = sum(r["grounding_score"] for r in rows) / n
+        hall = sum(1 for r in rows if r["hallucination_flag"]) / n
+        avg_len = sum(r["response_length"] for r in rows) / n
+        lines.append(
+            f"| {model_name} | {n} | {avg_g * 100:.1f}% | {hall * 100:.1f}% | {avg_len:.0f} words |"
+        )
+ 
+    lines.append("")
+    lines.append(
+        "_Methodology: grounding accuracy estimates the overlap between the "
+        "words used in each answer and the words present in the knowledge-base "
+        "passages retrieved for that question. Hallucination rate flags "
+        "answers whose overlap falls below a conservative threshold, excluding "
+        "cases where the assistant correctly declined due to missing "
+        "information. These are heuristic, in-session estimates based only on "
+        "this conversation's responses — not a substitute for a formal "
+        "evaluation against labeled ground truth._"
+    )
+ 
+    return "\n".join(lines)
+ 
+ 
+# ==================================================
 # TYPEWRITER REVEAL HELPERS
 # Renders text progressively into a placeholder so
 # responses feel like they're being typed live.
@@ -199,6 +323,17 @@ with st.sidebar:
         unsafe_allow_html=True
     )
  
+    if st.session_state.get("eval_log"):
+        st.markdown("---")
+        st.markdown('<div class="side-label">Evaluation Log</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="side-label" style="color:#DFF5E9 !important; text-transform:none; '
+            f'letter-spacing:0.2px; font-size:12.5px;">'
+            f'{len(st.session_state.eval_log)} knowledge-base answers logged this session. '
+            f'Ask for an "evaluation report" in chat to see it.</div>',
+            unsafe_allow_html=True
+        )
+ 
 # ==================================================
 # HERO SECTION
 # ==================================================
@@ -255,6 +390,9 @@ if "messages" not in st.session_state:
  
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
+ 
+if "eval_log" not in st.session_state:
+    st.session_state.eval_log = []
  
 # ==================================================
 # WELCOME SCREEN
@@ -359,9 +497,20 @@ if prompt:
         response_text = ""
  
         # -------------------------------
+        # EVALUATION REPORT
+        # -------------------------------
+        if is_eval_request(prompt):
+ 
+            time.sleep(0.4)
+            typewriter_markdown(placeholder, "Sure! Generating your evaluation report… 📊", delay=0.04)
+            time.sleep(0.3)
+            response_text = generate_evaluation_report()
+            placeholder.markdown(response_text)
+ 
+        # -------------------------------
         # GREETING
         # -------------------------------
-        if is_greeting(prompt):
+        elif is_greeting(prompt):
  
             response_text = GREETING_REPLY
             time.sleep(0.5)
@@ -439,6 +588,9 @@ Answer:
                 )
  
                 response_text = response.choices[0].message.content
+ 
+                log_rag_interaction(prompt, model_name, response_text, context)
+ 
                 typewriter_markdown(placeholder, response_text)
  
     st.session_state.messages.append({"role": "assistant", "content": response_text})
