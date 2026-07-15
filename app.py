@@ -273,17 +273,22 @@ for message in st.session_state.messages:
 # ==================================================
 # AZURE OPENAI INITIALIZATION
 # ==================================================
+import streamlit as st
+import os
+
+def get_secret(key):
+    return st.secrets.get(key, os.getenv(key))
 client = AzureOpenAI(
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_version=os.getenv("API_VERSION")
+    api_key=get_secret("AZURE_OPENAI_API_KEY"),
+    azure_endpoint=get_secret("AZURE_OPENAI_ENDPOINT"),
+    api_version=get_secret("API_VERSION")
 )
  
 embeddings = AzureOpenAIEmbeddings(
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    api_version=os.getenv("API_VERSION"),
-    azure_deployment=os.getenv("EMBEDDING_DEPLOYMENT")
+    azure_endpoint=get_secret("AZURE_OPENAI_ENDPOINT"),
+    api_key=get_secret("AZURE_OPENAI_API_KEY"),
+    api_version=get_secret("API_VERSION"),
+    azure_deployment=get_secret("EMBEDDING_DEPLOYMENT")
 )
  
 vectorstore = FAISS.load_local(
