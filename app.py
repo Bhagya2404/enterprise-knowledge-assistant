@@ -329,11 +329,57 @@ if prompt:
         # -------------------------------
         # GRATITUDE — instant warm reply, skips the pipeline
         # -------------------------------
-        if is_gratitude(prompt):
-            response_text = random.choice(GRATITUDE_REPLIES)
-            time.sleep(0.5)  # keep the typing moment visible and natural
-            typewriter_markdown(placeholder, response_text, delay=0.05)
- 
+               # -------------------------------
+        # GREETING
+        # -------------------------------
+        if is_greeting(prompt):
+
+            response_text = """
+### 👋 Welcome to Enterprise AI Assistant
+
+I can help you with:
+
+✅ Employee Policies
+
+✅ Leave & Attendance Information
+
+✅ Work From Home Guidelines
+
+✅ Travel Reimbursements
+
+✅ IT & VPN Support
+
+✅ Ticket Assistance
+
+✅ Enterprise Knowledge Search
+
+How can I help you today?
+"""
+
+            time.sleep(0.5)
+            typewriter_markdown(
+                placeholder,
+                response_text,
+                delay=0.03
+            )
+
+        # -------------------------------
+        # GRATITUDE
+        # -------------------------------
+        elif is_gratitude(prompt):
+
+            response_text = random.choice(
+                GRATITUDE_REPLIES
+            )
+
+            time.sleep(0.5)
+
+            typewriter_markdown(
+                placeholder,
+                response_text,
+                delay=0.05
+            )
+
         else:
             result = route_query(prompt)
  
@@ -369,7 +415,8 @@ if prompt:
             # RAG
             # -------------------------------
             else:
- 
+                
+                
                 docs = vectorstore.similarity_search(prompt, k=3)
  
                 context = "\n\n".join([doc.page_content for doc in docs])
