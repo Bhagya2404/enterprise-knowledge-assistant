@@ -15,6 +15,12 @@ from orchestrator import route_query
  
 load_dotenv()
  
+ 
+def get_secret(key):
+    """Reads from Streamlit secrets first (for Streamlit Cloud), falls back to .env locally."""
+    return st.secrets.get(key, os.getenv(key))
+ 
+ 
 # ==================================================
 # GRATITUDE DETECTION
 # A short "thank you" style message gets a warm,
@@ -40,10 +46,40 @@ def is_gratitude(text: str) -> bool:
     cleaned = re.sub(r"[^a-z\s]", "", text.lower()).strip()
     if cleaned in GRATITUDE_PHRASES:
         return True
-    # Also catch short messages like "thanks!" or "ok thank you"
     return len(cleaned.split()) <= 6 and any(
         phrase in cleaned for phrase in ["thank you", "thanks", "thankyou", "ty"]
     )
+ 
+ 
+# ==================================================
+# GREETING DETECTION
+# ==================================================
+GREETING_PHRASES = {
+    "hi", "hii", "hello", "hey",
+    "good morning", "good afternoon", "good evening", "hola"
+}
+ 
+ 
+def is_greeting(text: str) -> bool:
+    cleaned = re.sub(r"[^a-z\s]", "", text.lower()).strip()
+    return cleaned in GREETING_PHRASES
+ 
+ 
+GREETING_REPLY = """
+### 👋 Welcome to Enterprise AI Assistant
+ 
+I can help you with:
+ 
+✅ Employee Policies
+✅ Leave & Attendance Information
+✅ Work From Home Guidelines
+✅ Travel Reimbursements
+✅ IT & VPN Support
+✅ Ticket Assistance
+✅ Enterprise Knowledge Search
+ 
+How can I help you today?
+"""
  
  
 # ==================================================
@@ -70,6 +106,7 @@ def typewriter_alert(placeholder, text, kind="info", delay=0.028):
         shown += word + " "
         renderer(shown.strip())
         time.sleep(delay)
+ 
  
 # ==================================================
 # PAGE CONFIG
@@ -273,11 +310,6 @@ for message in st.session_state.messages:
 # ==================================================
 # AZURE OPENAI INITIALIZATION
 # ==================================================
-import streamlit as st
-import os
-
-def get_secret(key):
-    return st.secrets.get(key, os.getenv(key))
 client = AzureOpenAI(
     api_key=get_secret("AZURE_OPENAI_API_KEY"),
     azure_endpoint=get_secret("AZURE_OPENAI_ENDPOINT"),
@@ -327,59 +359,23 @@ if prompt:
         response_text = ""
  
         # -------------------------------
-        # GRATITUDE — instant warm reply, skips the pipeline
-        # -------------------------------
-               # -------------------------------
         # GREETING
         # -------------------------------
         if is_greeting(prompt):
-
-            response_text = """
-### 👋 Welcome to Enterprise AI Assistant
-
-I can help you with:
-
-✅ Employee Policies
-
-✅ Leave & Attendance Information
-
-✅ Work From Home Guidelines
-
-✅ Travel Reimbursements
-
-✅ IT & VPN Support
-
-✅ Ticket Assistance
-
-✅ Enterprise Knowledge Search
-
-How can I help you today?
-"""
-
+ 
+            response_text = GREETING_REPLY
             time.sleep(0.5)
-            typewriter_markdown(
-                placeholder,
-                response_text,
-                delay=0.03
-            )
-
+            typewriter_markdown(placeholder, response_text, delay=0.03)
+ 
         # -------------------------------
-        # GRATITUDE
+        # GRATITUDE — instant warm reply, skips the pipeline
         # -------------------------------
         elif is_gratitude(prompt):
-
-            response_text = random.choice(
-                GRATITUDE_REPLIES
-            )
-
+ 
+            response_text = random.choice(GRATITUDE_REPLIES)
             time.sleep(0.5)
-
-            typewriter_markdown(
-                placeholder,
-                response_text,
-                delay=0.05
-            )
-
+            typewriter_markdown(placeholder, response_text, delay=0.05)
+ 
         else:
             result = route_query(prompt)
  
@@ -415,8 +411,7 @@ How can I help you today?
             # RAG
             # -------------------------------
             else:
-                
-                
+ 
                 docs = vectorstore.similarity_search(prompt, k=3)
  
                 context = "\n\n".join([doc.page_content for doc in docs])
